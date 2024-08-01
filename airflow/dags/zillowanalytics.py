@@ -4,7 +4,7 @@ import json
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 import requests
-
+from airflow.providers.amazon.aws.sensor.s3 import S3KeySensor
 
 #Load JSON Config File
 
@@ -15,6 +15,9 @@ with open('/home/ubuntu/airflow/config_api.json','r') as config_file:
 now = datetime.now()
 dt_now_string = now.strftime("%d%m%Y%H%M%S")
 
+
+## S3 bucket and file details
+s3_bucket = 'zillow-analytics-lambda-updated-json-to-csv'
 
 #Python Callable function used in DAG
 def extract_zillow_data(**kwargs):
@@ -65,10 +68,21 @@ with DAG('zillow-analytics-dag',
 
         load_to_s3 = BashOperator(
             task_id = "task_load_to_S3",
-            bash_command = 'aws s3 mv {{ ti.xcom_pull("tsk_extract_zillow_data_var")[0]   }} s3://zillow-analytics-youtube/'
+            bash_command = 'aws s3 mv {{ ti.xcom_pull("tsk_extract_zillow_data_var")[0]   }} s3://zillow-analytics-youtube-json-raw-data/'
         )
 
-        extract_zillow_data_var >> load_to_s3
+        is_file_in_s3_available = S3KeySensor(
+            task_id = 'is_file_in_s3_available',
+            bucket_key = '{{ti.xcom_pull("tsk_extract_zillow_data_var)[1]}}',
+            bucket_name = s3_bucket,
+            aws_conn_id = 'aws_s3_conn',
+            wildcard_match = False,
+            timeout = 120, # OPtional : Timeout for the sensor (in seconds)
+            poke_interval = 5, #OPTIONAL: Time interval between s3 checks ( in seconds)
+        )
+
+
+        extract_zillow_data_var >> load_to_s3 >> is_file_in_s3_available
 
 
 
